@@ -55,6 +55,13 @@ fn main() -> Result<()> {
     #[allow(unused)]
     let default_nvs = Arc::new(EspDefaultNvs::new()?);
 
+    #[allow(unused_mut)]
+    let mut wifi = wifi(
+        netif_stack.clone(),
+        sys_loop_stack.clone(),
+        default_nvs.clone(),
+    )?;
+
     let mutex = Arc::new((Mutex::new(None), Condvar::new()));
 
     let httpd = httpd(mutex.clone())?;
@@ -78,12 +85,8 @@ fn main() -> Result<()> {
     drop(httpd);
     info!("Httpd stopped");
 
-    {
-        drop(wifi);
-        info!("Wifi stopped");
-    }
-
-
+    drop(wifi);
+    info!("Wifi stopped");
 
     Ok(())
 }
@@ -93,8 +96,8 @@ fn httpd(mutex: Arc<(Mutex<Option<u32>>, Condvar)>) -> Result<idf::Server> {
     let server = idf::ServerRegistry::new()
         .at("/")
         .get(|_| Ok("Hello, world!".into()))?
-        .at("/foo")
-        .get(|_| bail!("Boo, something happened!"))?
+        .at("/mandelbrot")
+        .get(|_| Ok("Soon, I shall render Mandelbrot images for you!".into()))?
         .at("/bar")
         .get(|_| {
             Response::new(403)
@@ -117,25 +120,9 @@ fn wifi(
 ) -> Result<Box<EspWifi>> {
     let mut wifi = Box::new(EspWifi::new(netif_stack, sys_loop_stack, default_nvs)?);
 
-    info!("Wifi created, about to scan");
+    info!("Wifi created, about to connect to hidden SSID");
 
-    let ap_infos = wifi.scan()?;
-
-    let ours = ap_infos.into_iter().find(|a| a.ssid == SSID);
-
-    let channel = if let Some(ours) = ours {
-        info!(
-            "Found configured access point {} on channel {}",
-            SSID, ours.channel
-        );
-        Some(ours.channel)
-    } else {
-        info!(
-            "Configured access point {} not found during scanning, will go with unknown channel",
-            SSID
-        );
-        None
-    };
+    let channel = None; // using hidden SSID, so channel is unknown
 
     wifi.set_configuration(&Configuration::Mixed(
         ClientConfiguration {
