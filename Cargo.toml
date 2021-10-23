@@ -20,9 +20,12 @@ getrandom1 = { version = "0.1", git = "https://github.com/esp-rs-compat/getrando
 # symbols are nice and they don't increase the size on Flash
 debug = true
 opt-level = "z"
+lto = "thin"
 
 [profile.dev]
 opt-level = "s"
+#codegen-units = 1
+lto = "thin"
 
 [features]
 # Enable this feature for the build to use ESP-IDF native tooling instead of PlatformIO under the hood
@@ -37,7 +40,10 @@ embedded-svc = "0.11"
 esp-idf-svc = "0.27"
 esp-idf-hal = "0.21"
 embedded-hal = "0.2"
-
+num = "0.4"
+image = "0.6"
+#rayon = "1.5"
+crossbeam = "0.7"
 
 #backtrace = { git = "https://github.com/ivmarkov/backtrace-rs.git" }
 

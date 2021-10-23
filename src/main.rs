@@ -175,5 +175,5 @@ fn ping(ip_settings: &ipv4::ClientSettings) -> Result<()> {
     Ok(())
 }
 
-
+mod mandelbrot;
 
