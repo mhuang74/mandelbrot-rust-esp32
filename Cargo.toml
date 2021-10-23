@@ -1,0 +1,46 @@
+[package]
+name = "mandelbrot-esp32"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# No xtensa in regular compiler yet
+[package.metadata.docs.rs]
+default-target = "x86_64-unknown-linux-gnu"
+
+[patch.crates-io]
+smol = { git = "https://github.com/esp-rs-compat/smol" }
+polling = { git = "https://github.com/esp-rs-compat/polling" }
+socket2 = { git = "https://github.com/esp-rs-compat/socket2" }
+getrandom = { version = "0.2", git = "https://github.com/esp-rs-compat/getrandom.git" }
+getrandom1 = { version = "0.1", git = "https://github.com/esp-rs-compat/getrandom.git", package = "getrandom", branch = "0.1" }
+
+[profile.release]
+# symbols are nice and they don't increase the size on Flash
+debug = true
+opt-level = "z"
+
+[profile.dev]
+opt-level = "s"
+
+[features]
+# Enable this feature for the build to use ESP-IDF native tooling instead of PlatformIO under the hood
+native = ["esp-idf-sys/native"]
+
+
+[dependencies]
+anyhow = {version = "1", features = ["backtrace"]}
+log = "0.4"
+esp-idf-sys = { version = "0.21", features = ["binstart"] }
+embedded-svc = "0.11"
+esp-idf-svc = "0.27"
+esp-idf-hal = "0.21"
+embedded-hal = "0.2"
+
+
+#backtrace = { git = "https://github.com/ivmarkov/backtrace-rs.git" }
+
+[build-dependencies]
+embuild = "0.24.5"
+anyhow = "1"
