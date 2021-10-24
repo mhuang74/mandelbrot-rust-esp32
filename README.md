@@ -2,7 +2,7 @@
 
 Render Mandelbrot Images via Rust on ESP32.
 
-Based on [rust-esp32-std-hello](https://github.com/ivmarkov/rust-esp32-std-hello)
+Based on [rust-esp32-std-demo](https://github.com/ivmarkov/rust-esp32-std-demo)
 
 ## Build
 
