@@ -3,10 +3,12 @@
 target = "xtensa-esp32-espidf"
 #target = "xtensa-esp32s2-espidf"
 #target = "riscv32imc-esp-espidf"
+# workaround for crossbeam-util Atomic64 errors
+rustflags = ["--cfg", "crossbeam_no_atomic_64"]
+rustdocflags = ["--cfg", "crossbeam_no_atomic_64"]
 
 [target.xtensa-esp32-espidf]
 linker = "ldproxy"
-rustflags = ["--cfg", "crossbeam_no_atomic_64"]
 
 [target.xtensa-esp32s2-espidf]
 linker = "ldproxy"

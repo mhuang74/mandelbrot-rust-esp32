@@ -46,7 +46,7 @@ fn escape_time(c: Complex<f32>, limit: usize) -> Option<usize> {
 /// which holds one grayschale pixel per byte. The `upper_left` and `lower_left`
 /// arguments specify points on the complex plane corresponding to the upper-left 
 /// and lower-right corners of the pixel buffer.
-fn render(pixels: &mut [u8], 
+pub fn render(pixels: &mut [u8], 
     bounds: (usize, usize), 
     upper_left: Complex<f32>, 
     lower_right: Complex<f32>) {

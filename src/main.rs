@@ -91,13 +91,50 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+use num::Complex;
+mod mandelbrot;
+use image::{ColorType, png::PngEncoder};
+
+fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
+    info!("Handling Mandelbrot request");
+
+    // Example: {} mandel.png 1000x750 -1.20,0.35 -1,0.20
+
+    let bounds = (1000,750);
+    let upper_left = Complex { re: -1.20, im: 0.35};
+    let lower_right = Complex { re: -1.0, im: 0.20};
+
+    let mut pixels = vec![0; bounds.0 * bounds.1];
+
+    mandelbrot::render(&mut pixels, bounds, upper_left, lower_right);
+    info!("Mandelbrot rendered!");
+
+    let mut png = Vec::new();
+    let encoder = PngEncoder::new(&mut png);
+    encoder.encode(&pixels, bounds.0 as u32, bounds.1 as u32, ColorType::L8).expect("Unable to encode PNG");
+
+    info!("Mandelbrot converted to png!");
+
+    let response = Response::new(200)
+        .content_type("image/png")
+        .content_len(pixels.len())
+        .header("Content-Disposition", "inline; filename=mandel.png")
+        .header("Access-Control-Allow-Origin", "*")
+        // .header("X-Timestamp", SystemTime::now())
+        .body(Body::from(pixels))
+        ;
+    info!("Created Mandelbrot response");
+
+    Ok(response)
+}
+
 #[allow(unused_variables)]
 fn httpd(mutex: Arc<(Mutex<Option<u32>>, Condvar)>) -> Result<idf::Server> {
     let server = idf::ServerRegistry::new()
         .at("/")
         .get(|_| Ok("Hello, world!".into()))?
         .at("/mandelbrot")
-        .get(|_| Ok("Soon, I shall render Mandelbrot images for you!".into()))?
+        .get(handle_mandelbrot)?
         .at("/bar")
         .get(|_| {
             Response::new(403)
@@ -175,5 +212,5 @@ fn ping(ip_settings: &ipv4::ClientSettings) -> Result<()> {
     Ok(())
 }
 
-mod mandelbrot;
+
 
