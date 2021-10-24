@@ -42,10 +42,13 @@ RUST_ESP32_STD_HELLO_WIFI_PASS = "PASSWORD"
 - [X] stripped down version of rust-esp32-std-hello as base
 - [X] add `num` dependency
   - cannot compile `num=0.4` crate, hitting this [error](https://github.com/espressif/llvm-project/issues/13)
-    - FIXED: add `lto = "thin"` to dev and release profiles of Cargo.toml 
+    - FIX: add `lto = "thin"` to dev and release profiles of Cargo.toml 
 - [X] add `image` dependency
-  - cannot compile `image=0.23`, hitting Atomic64 error from crossbeam=0.8.5
-    - FIXED: lower to `image=0.8`
-- [ ] add `rayon` dependency 
+  - cannot compile `image=0.23`, hitting Atomic64 error from crossbeam-utils=0.8.5
+    - FIX: lower to `image=0.8`
+    - FIX: switched back to latest `image=0.23` by switching off Atomic64 on crossbeam-utils [issue-731](https://github.com/crossbeam-rs/crossbeam/issues/731)
+- [X] add `rayon` dependency 
   - cannot compile any version of rayon due to Atomic64 error from crossbeam
-- [X] switch to use `crossbeam=0.7` instead and follow the _task-queue_ approach from Programming Rust 
+    - consider switching to use `crossbeam=0.7` instead and follow the _task-queue_ approach from Programming Rust 
+    - FIX: switched back to latest `rayon=1.5` by switching off Atomic64 on crossbeam-utils [issue-731](https://github.com/crossbeam-rs/crossbeam/issues/731)
+

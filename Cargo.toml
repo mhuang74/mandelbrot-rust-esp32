@@ -24,7 +24,6 @@ lto = "thin"
 
 [profile.dev]
 opt-level = "s"
-#codegen-units = 1
 lto = "thin"
 
 [features]
@@ -41,9 +40,9 @@ esp-idf-svc = "0.27"
 esp-idf-hal = "0.21"
 embedded-hal = "0.2"
 num = "0.4"
-image = "0.6"
-#rayon = "1.5"
-crossbeam = "0.7"
+image = "0.23"
+rayon = "1.5"
+#crossbeam = "0.7"
 
 #backtrace = { git = "https://github.com/ivmarkov/backtrace-rs.git" }
 
