@@ -26,9 +26,9 @@ use esp_idf_hal::prelude::*;
 
 
 #[allow(dead_code)]
-const SSID: &str = env!("RUST_ESP32_STD_HELLO_WIFI_SSID");
+const SSID: &str = env!("RUST_ESP32_STD_DEMO_WIFI_SSID");
 #[allow(dead_code)]
-const PASS: &str = env!("RUST_ESP32_STD_HELLO_WIFI_PASS");
+const PASS: &str = env!("RUST_ESP32_STD_DEMO_WIFI_PASS");
 
 
 thread_local! {
@@ -93,14 +93,14 @@ fn main() -> Result<()> {
 
 use num::Complex;
 mod mandelbrot;
-use image::{ColorType, png::PngEncoder};
+use image::{ColorType, codecs::jpeg::JpegEncoder};
 
 fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
     info!("Handling Mandelbrot request");
 
     // Example: {} mandel.png 1000x750 -1.20,0.35 -1,0.20
 
-    let bounds = (1000,750);
+    let bounds = (1024,768);
     let upper_left = Complex { re: -1.20, im: 0.35};
     let lower_right = Complex { re: -1.0, im: 0.20};
 
@@ -109,19 +109,20 @@ fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
     mandelbrot::render(&mut pixels, bounds, upper_left, lower_right);
     info!("Mandelbrot rendered!");
 
-    let mut png = Vec::new();
-    let encoder = PngEncoder::new(&mut png);
-    encoder.encode(&pixels, bounds.0 as u32, bounds.1 as u32, ColorType::L8).expect("Unable to encode PNG");
+    let mut encoded = Vec::new();
+    JpegEncoder::new(&mut encoded)
+        .encode(&pixels, bounds.0 as u32, bounds.1 as u32, ColorType::L8)
+        .expect("Unable to encode image");
 
-    info!("Mandelbrot converted to png!");
+    info!("Mandelbrot converted to jpeg!");
 
     let response = Response::new(200)
-        .content_type("image/png")
-        .content_len(pixels.len())
-        .header("Content-Disposition", "inline; filename=mandel.png")
+        .content_type("image/jpeg")
+        .content_len(encoded.len())
+        .header("Content-Disposition", "inline; filename=mandel.jpg")
         .header("Access-Control-Allow-Origin", "*")
         // .header("X-Timestamp", SystemTime::now())
-        .body(Body::from(pixels))
+        .body(Body::from(encoded))
         ;
     info!("Created Mandelbrot response");
 
