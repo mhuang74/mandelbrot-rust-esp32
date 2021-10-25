@@ -54,6 +54,6 @@ RUST_ESP32_STD_HELLO_WIFI_PASS = "PASSWORD"
 - [X] render Mandelbrot using single thread
 - [X] encode image as jpeg
   - get LLVM error if encode as png
-  [X] put encoded image in HTTP response using Embedded::Svr interface
-  [X] successfully see Mandelbrot image in browser
+- [X] put encoded image in HTTP response using Embedded::Svr interface
+- [X] successfully see Mandelbrot image in browser
 
