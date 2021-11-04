@@ -27,7 +27,7 @@ extra-link-arg = true   # No longer necessary since 1.56, as it was stabilized: 
 
 [env]
 ESP_IDF_SYS_GLOB_BASE = { value = ".", relative = true }
-#ESP_IDF_VERSION = { value = "master" } # Uncomment this and enable the esp-idf-sys "native" build feature to build against ESP-IDF master
+ESP_IDF_VERSION = { value = "master" } # Uncomment this and enable the esp-idf-sys "native" build feature to build against ESP-IDF master
 
 # These configurations will pick up your custom "sdkconfig.release" (for release builds) / "sdkconfig.debug" (for debug bulds) that you might put in the root of the project
 # The easiest way to generate these configurations is by running "cargo pio espidf menuconfig"

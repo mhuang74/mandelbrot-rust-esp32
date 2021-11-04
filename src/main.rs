@@ -1,19 +1,27 @@
 #![allow(clippy::single_component_path_imports)]
 //#![feature(backtrace)]
 
+#[cfg(all(feature = "qemu", not(esp32)))]
+compile_error!("The `qemu` feature can only be built for the `xtensa-esp32-espidf` target.");
+
 use std::sync::{Condvar, Mutex};
-use std::{cell::RefCell, env, sync::Arc, thread, time::*};
+use std::{env, sync::Arc, thread, time::*};
 
 use anyhow::*;
 use log::*;
 
 
+use embedded_svc::anyerror::*;
+use embedded_svc::eth;
+use embedded_svc::eth::Eth;
 use embedded_svc::httpd::registry::*;
 use embedded_svc::httpd::*;
+use embedded_svc::io;
 use embedded_svc::ipv4;
 use embedded_svc::ping::Ping;
 use embedded_svc::wifi::*;
 
+use esp_idf_svc::eth::*;
 use esp_idf_svc::httpd as idf;
 use esp_idf_svc::netif::*;
 use esp_idf_svc::nvs::*;
@@ -23,17 +31,19 @@ use esp_idf_svc::wifi::*;
 
 use esp_idf_hal::prelude::*;
 
-
-
 #[allow(dead_code)]
+#[cfg(not(feature = "qemu"))]
 const SSID: &str = env!("RUST_ESP32_STD_DEMO_WIFI_SSID");
 #[allow(dead_code)]
+#[cfg(not(feature = "qemu"))]
 const PASS: &str = env!("RUST_ESP32_STD_DEMO_WIFI_PASS");
 
+const MAX_BOUNDS: (usize, usize) = (256, 256);
 
-thread_local! {
-    static TLS: RefCell<u32> = RefCell::new(13);
-}
+// statically allocate image buffers
+static mut PIXELS:[u8;  MAX_BOUNDS.0 * MAX_BOUNDS.1] = [0; MAX_BOUNDS.0 * MAX_BOUNDS.1];
+// statically allocate buffer for encoded image; assume jpeg gives at least 5:1 compression
+static mut ENCODED:[u8; (MAX_BOUNDS.0 / 5 as usize) * (MAX_BOUNDS.1 / 5 as usize)] = [0; (MAX_BOUNDS.0 / 5 as usize) * (MAX_BOUNDS.1 / 5 as usize)];
 
 fn main() -> Result<()> {
     // Bind the log crate to the ESP Logging facilities
@@ -55,12 +65,19 @@ fn main() -> Result<()> {
     #[allow(unused)]
     let default_nvs = Arc::new(EspDefaultNvs::new()?);
 
+    #[cfg(not(feature = "qemu"))]
     #[allow(unused_mut)]
     let mut wifi = wifi(
         netif_stack.clone(),
         sys_loop_stack.clone(),
         default_nvs.clone(),
     )?;
+
+    #[cfg(feature = "qemu")]
+    let eth = eth_configure(Box::new(EspEth::new_openeth(
+        netif_stack.clone(),
+        sys_loop_stack.clone(),
+    )?))?;    
 
     let mutex = Arc::new((Mutex::new(None), Condvar::new()));
 
@@ -85,8 +102,17 @@ fn main() -> Result<()> {
     drop(httpd);
     info!("Httpd stopped");
 
-    drop(wifi);
-    info!("Wifi stopped");
+    #[cfg(not(feature = "qemu"))]
+    {
+        drop(wifi);
+        info!("Wifi stopped");
+    }
+
+    #[cfg(any(feature = "qemu"))]
+    {
+        let _eth_peripherals = eth.release()?;
+        info!("Eth stopped");
+    }
 
     Ok(())
 }
@@ -95,38 +121,39 @@ use num::Complex;
 mod mandelbrot;
 use image::{ColorType, codecs::jpeg::JpegEncoder};
 
+
 fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
     info!("Handling Mandelbrot request");
 
     // Example: {} mandel.png 1000x750 -1.20,0.35 -1,0.20
-
-    let bounds = (128,128);
+    let bounds = &MAX_BOUNDS;
     let upper_left = Complex { re: -1.20, im: 0.35};
     let lower_right = Complex { re: -1.0, im: 0.20};
 
-    let mut pixels = vec![0; bounds.0 * bounds.1];
+    unsafe {
+        mandelbrot::render(&mut PIXELS, MAX_BOUNDS, upper_left, lower_right);
+        info!("Mandelbrot rendered!");
 
-    mandelbrot::render(&mut pixels, bounds, upper_left, lower_right);
-    info!("Mandelbrot rendered!");
+        JpegEncoder::new(&mut ENCODED.to_vec())
+            .encode(&PIXELS, bounds.0 as u32, bounds.1 as u32, ColorType::L8)
+            .expect("Unable to encode image");
 
-    let mut encoded = Vec::new();
-    JpegEncoder::new(&mut encoded)
-        .encode(&pixels, bounds.0 as u32, bounds.1 as u32, ColorType::L8)
-        .expect("Unable to encode image");
+        info!("Mandelbrot converted to jpeg!");
 
-    info!("Mandelbrot converted to jpeg!");
+        let response = Response::new(200)
+            .content_type("image/jpeg")
+            .content_len(ENCODED.len())
+            .header("Content-Disposition", "inline; filename=mandel.jpg")
+            .header("Access-Control-Allow-Origin", "*")
+            // .header("X-Timestamp", SystemTime::now())
+            .body(Body::from(ENCODED.to_vec()))
+            ;
+        info!("Created Mandelbrot response");
 
-    let response = Response::new(200)
-        .content_type("image/jpeg")
-        .content_len(encoded.len())
-        .header("Content-Disposition", "inline; filename=mandel.jpg")
-        .header("Access-Control-Allow-Origin", "*")
-        // .header("X-Timestamp", SystemTime::now())
-        .body(Body::from(encoded))
-        ;
-    info!("Created Mandelbrot response");
+        Ok(response)
+    }
 
-    Ok(response)
+
 }
 
 #[allow(unused_variables)]
@@ -149,7 +176,7 @@ fn httpd(mutex: Arc<(Mutex<Option<u32>>, Condvar)>) -> Result<idf::Server> {
 }
 
 
-
+#[cfg(not(feature = "qemu"))]
 #[allow(dead_code)]
 fn wifi(
     netif_stack: Arc<EspNetifStack>,
@@ -195,6 +222,29 @@ fn wifi(
     Ok(wifi)
 }
 
+#[cfg(any(feature = "qemu"))]
+fn eth_configure<HW>(mut eth: Box<EspEth<HW>>) -> Result<Box<EspEth<HW>>> {
+    info!("Eth created");
+
+    eth.set_configuration(&eth::Configuration::Client(Default::default()))?;
+
+    info!("Eth configuration set, about to get status");
+
+    let status = eth.get_status();
+
+    if let eth::Status::Started(eth::ConnectionStatus::Connected(eth::IpStatus::Done(Some(
+        ip_settings,
+    )))) = status
+    {
+        info!("Eth connected");
+
+        ping(&ip_settings)?;
+    } else {
+        bail!("Unexpected Eth status: {:?}", status);
+    }
+
+    Ok(eth)
+}
 
 fn ping(ip_settings: &ipv4::ClientSettings) -> Result<()> {
     info!("About to do some pings for {:?}", ip_settings);
