@@ -1,35 +1,33 @@
 #![allow(clippy::single_component_path_imports)]
-//#![feature(backtrace)]
+// #![feature(backtrace)]
 
 #[cfg(all(feature = "qemu", not(esp32)))]
 compile_error!("The `qemu` feature can only be built for the `xtensa-esp32-espidf` target.");
 
 use std::sync::{Condvar, Mutex};
-use std::{env, sync::Arc, thread, time::*};
+use std::{sync::Arc, thread, time::*};
 
 use anyhow::*;
 use log::*;
 
 
-use embedded_svc::anyerror::*;
-use embedded_svc::eth;
-use embedded_svc::eth::Eth;
+//use embedded_svc::anyerror::*;
+//use embedded_svc::eth;
+//use embedded_svc::eth::Eth;
 use embedded_svc::httpd::registry::*;
 use embedded_svc::httpd::*;
-use embedded_svc::io;
-use embedded_svc::ipv4;
-use embedded_svc::ping::Ping;
+//use embedded_svc::ipv4;
 use embedded_svc::wifi::*;
 
-use esp_idf_svc::eth::*;
+//use esp_idf_svc::eth::*;
 use esp_idf_svc::httpd as idf;
 use esp_idf_svc::netif::*;
 use esp_idf_svc::nvs::*;
-use esp_idf_svc::ping;
 use esp_idf_svc::sysloop::*;
+#[allow(unused_imports)]
 use esp_idf_svc::wifi::*;
 
-use esp_idf_hal::prelude::*;
+use esp_idf_sys;
 
 #[allow(dead_code)]
 #[cfg(not(feature = "qemu"))]
@@ -38,25 +36,37 @@ const SSID: &str = env!("RUST_ESP32_STD_DEMO_WIFI_SSID");
 #[cfg(not(feature = "qemu"))]
 const PASS: &str = env!("RUST_ESP32_STD_DEMO_WIFI_PASS");
 
-const MAX_BOUNDS: (usize, usize) = (256, 256);
+//const MAX_BOUNDS: (usize, usize) = (64, 64);
 
 // statically allocate image buffers
-static mut PIXELS:[u8;  MAX_BOUNDS.0 * MAX_BOUNDS.1] = [0; MAX_BOUNDS.0 * MAX_BOUNDS.1];
+// static mut PIXELS:[u8;  MAX_BOUNDS.0 * MAX_BOUNDS.1] = [0; MAX_BOUNDS.0 * MAX_BOUNDS.1];
 // statically allocate buffer for encoded image; assume jpeg gives at least 5:1 compression
-static mut ENCODED:[u8; (MAX_BOUNDS.0 / 5 as usize) * (MAX_BOUNDS.1 / 5 as usize)] = [0; (MAX_BOUNDS.0 / 5 as usize) * (MAX_BOUNDS.1 / 5 as usize)];
+// static mut ENCODED:[u8; (MAX_BOUNDS.0 / 5 as usize) * (MAX_BOUNDS.1 / 5 as usize)] = [0; (MAX_BOUNDS.0 / 5 as usize) * (MAX_BOUNDS.1 / 5 as usize)];
+
+fn print_heap_info() {
+    unsafe {
+        // esp_idf_sys::heap_caps_print_heap_info(esp_idf_sys::MALLOC_CAP_8BIT);
+        
+        let min_free_8bit_cap = esp_idf_sys::heap_caps_get_minimum_free_size(esp_idf_sys::MALLOC_CAP_8BIT);
+        info!("Min Free DRAM:\t{}", min_free_8bit_cap);
+
+        // esp_idf_sys::heap_caps_check_integrity_all(true);
+
+    }
+
+
+}
 
 fn main() -> Result<()> {
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    // Get backtraces from anyhow; only works for Xtensa arch currently
-    #[cfg(arch = "xtensa")]
-    env::set_var("RUST_BACKTRACE", "1");
+    info!("Hello from Mandelbrot-ESP!");
+    print_heap_info();
 
-    #[allow(unused)]
-    let peripherals = Peripherals::take().unwrap();
-    #[allow(unused)]
-    let pins = peripherals.pins;
+    // Get backtraces from anyhow; only works for Xtensa arch currently
+    // #[cfg(arch = "xtensa")]
+    // env::set_var("RUST_BACKTRACE", "1");
 
     #[allow(unused)]
     let netif_stack = Arc::new(EspNetifStack::new()?);
@@ -65,6 +75,8 @@ fn main() -> Result<()> {
     #[allow(unused)]
     let default_nvs = Arc::new(EspDefaultNvs::new()?);
 
+    info!("before network start");
+  
     #[cfg(not(feature = "qemu"))]
     #[allow(unused_mut)]
     let mut wifi = wifi(
@@ -79,9 +91,11 @@ fn main() -> Result<()> {
         sys_loop_stack.clone(),
     )?))?;    
 
-    let mutex = Arc::new((Mutex::new(None), Condvar::new()));
+    let mutex: Arc<(std::sync::Mutex<Option<u32>>, Condvar)> = Arc::new((Mutex::new(None), Condvar::new()));
 
-    let httpd = httpd(mutex.clone())?;
+    info!("before httpd start");
+
+    let httpd = httpd()?;
 
     let mut wait = mutex.0.lock().unwrap();
 
@@ -112,41 +126,45 @@ fn main() -> Result<()> {
     {
         let _eth_peripherals = eth.release()?;
         info!("Eth stopped");
-    }
+    } 
 
     Ok(())
 }
 
 use num::Complex;
 mod mandelbrot;
-use image::{ColorType, codecs::jpeg::JpegEncoder};
+use image::{ColorType, codecs::bmp::BmpEncoder};
 
 
 fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
     info!("Handling Mandelbrot request");
 
     // Example: {} mandel.png 1000x750 -1.20,0.35 -1,0.20
-    let bounds = &MAX_BOUNDS;
+    let bounds = (100, 85);
     let upper_left = Complex { re: -1.20, im: 0.35};
     let lower_right = Complex { re: -1.0, im: 0.20};
 
-    unsafe {
-        mandelbrot::render(&mut PIXELS, MAX_BOUNDS, upper_left, lower_right);
-        info!("Mandelbrot rendered!");
+    let mut PIXELS = vec![0; bounds.0 * bounds.1];
+    let mut ENCODED = Vec::new();
 
-        JpegEncoder::new(&mut ENCODED.to_vec())
+    unsafe {
+        mandelbrot::render(&mut PIXELS, bounds, upper_left, lower_right);
+        info!("Mandelbrot rendered!");
+        print_heap_info();
+
+        BmpEncoder::new(&mut ENCODED)
             .encode(&PIXELS, bounds.0 as u32, bounds.1 as u32, ColorType::L8)
             .expect("Unable to encode image");
 
         info!("Mandelbrot converted to jpeg!");
 
         let response = Response::new(200)
-            .content_type("image/jpeg")
+            .content_type("image/bmp")
             .content_len(ENCODED.len())
-            .header("Content-Disposition", "inline; filename=mandel.jpg")
+            .header("Content-Disposition", "inline; filename=mandel.bmp")
             .header("Access-Control-Allow-Origin", "*")
             // .header("X-Timestamp", SystemTime::now())
-            .body(Body::from(ENCODED.to_vec()))
+            .body(Body::from(ENCODED))
             ;
         info!("Created Mandelbrot response");
 
@@ -157,13 +175,15 @@ fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
 }
 
 #[allow(unused_variables)]
-fn httpd(mutex: Arc<(Mutex<Option<u32>>, Condvar)>) -> Result<idf::Server> {
+fn httpd() -> Result<idf::Server> {
     let server = idf::ServerRegistry::new()
         .at("/")
         .get(|_| Ok("Hello, world!".into()))?
         .at("/mandelbrot")
         .get(handle_mandelbrot)?
-        .at("/bar")
+        .at("/stop")
+        .get(|_| bail!("Stopping server!"))?
+        .at("/secret")
         .get(|_| {
             Response::new(403)
                 .status_message("No permissions")
@@ -208,13 +228,11 @@ fn wifi(
     let status = wifi.get_status();
 
     if let Status(
-        ClientStatus::Started(ClientConnectionStatus::Connected(ClientIpStatus::Done(ip_settings))),
+        ClientStatus::Started(ClientConnectionStatus::Connected(ClientIpStatus::Done(_ip_settings))),
         ApStatus::Started(ApIpStatus::Done),
     ) = status
     {
         info!("Wifi connected");
-
-        ping(&ip_settings)?;
     } else {
         bail!("Unexpected Wifi status: {:?}", status);
     }
@@ -233,12 +251,10 @@ fn eth_configure<HW>(mut eth: Box<EspEth<HW>>) -> Result<Box<EspEth<HW>>> {
     let status = eth.get_status();
 
     if let eth::Status::Started(eth::ConnectionStatus::Connected(eth::IpStatus::Done(Some(
-        ip_settings,
+        _ip_settings,
     )))) = status
     {
         info!("Eth connected");
-
-        ping(&ip_settings)?;
     } else {
         bail!("Unexpected Eth status: {:?}", status);
     }
@@ -246,22 +262,7 @@ fn eth_configure<HW>(mut eth: Box<EspEth<HW>>) -> Result<Box<EspEth<HW>>> {
     Ok(eth)
 }
 
-fn ping(ip_settings: &ipv4::ClientSettings) -> Result<()> {
-    info!("About to do some pings for {:?}", ip_settings);
 
-    let ping_summary =
-        ping::EspPing::default().ping(ip_settings.subnet.gateway, &Default::default())?;
-    if ping_summary.transmitted != ping_summary.received {
-        bail!(
-            "Pinging gateway {} resulted in timeouts",
-            ip_settings.subnet.gateway
-        );
-    }
-
-    info!("Pinging done");
-
-    Ok(())
-}
 
 
 
