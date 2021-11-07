@@ -1,25 +1,32 @@
 #![allow(clippy::single_component_path_imports)]
-// #![feature(backtrace)]
+#![feature(backtrace)]
 
 #[cfg(all(feature = "qemu", not(esp32)))]
 compile_error!("The `qemu` feature can only be built for the `xtensa-esp32-espidf` target.");
 
 use std::sync::{Condvar, Mutex};
+use std::usize;
 use std::{sync::Arc, thread, time::*};
+use std::collections::{HashMap};
 
 use anyhow::*;
 use log::*;
 
-
-//use embedded_svc::anyerror::*;
-//use embedded_svc::eth;
-//use embedded_svc::eth::Eth;
+#[allow(unused_imports)]
+use embedded_svc::anyerror::*;
+#[allow(unused_imports)]
+use embedded_svc::eth;
+#[allow(unused_imports)]
+use embedded_svc::eth::Eth;
 use embedded_svc::httpd::registry::*;
 use embedded_svc::httpd::*;
-//use embedded_svc::ipv4;
+#[allow(unused_imports)]
+use embedded_svc::ipv4;
+#[allow(unused_imports)]
 use embedded_svc::wifi::*;
 
-//use esp_idf_svc::eth::*;
+#[allow(unused_imports)]
+use esp_idf_svc::eth::*;
 use esp_idf_svc::httpd as idf;
 use esp_idf_svc::netif::*;
 use esp_idf_svc::nvs::*;
@@ -45,28 +52,36 @@ const PASS: &str = env!("RUST_ESP32_STD_DEMO_WIFI_PASS");
 
 fn print_heap_info() {
     unsafe {
-        // esp_idf_sys::heap_caps_print_heap_info(esp_idf_sys::MALLOC_CAP_8BIT);
-        
-        let min_free_8bit_cap = esp_idf_sys::heap_caps_get_minimum_free_size(esp_idf_sys::MALLOC_CAP_8BIT);
-        info!("Min Free DRAM:\t{}", min_free_8bit_cap);
+        esp_idf_sys::heap_caps_print_heap_info(esp_idf_sys::MALLOC_CAP_8BIT);
+    }
+}
 
-        // esp_idf_sys::heap_caps_check_integrity_all(true);
+fn test_memory_allocation(kb_blocks:usize, step:usize) -> () {
+    const KILOBYTE: usize = 1024;
 
+    print_heap_info();
+
+    for i in (1..kb_blocks).step_by(step) {
+        let size = i * KILOBYTE;
+        info!("{}: allocating Vec<u8> of size: {}", i, size);
+        let _new_vec: Vec<u8> = Vec::with_capacity(size);
     }
 
-
+    info!("Allocated {:?} KB blocks in step of {:?}.", &kb_blocks, &step);
 }
 
 fn main() -> Result<()> {
     // Bind the log crate to the ESP Logging facilities
     esp_idf_svc::log::EspLogger::initialize_default();
 
+    // Get backtraces from anyhow; only works for Xtensa arch currently
+    #[cfg(arch = "xtensa")]
+    env::set_var("RUST_BACKTRACE", "1");
+
     info!("Hello from Mandelbrot-ESP!");
     print_heap_info();
 
-    // Get backtraces from anyhow; only works for Xtensa arch currently
-    // #[cfg(arch = "xtensa")]
-    // env::set_var("RUST_BACKTRACE", "1");
+    test_memory_allocation(1024, 64);
 
     #[allow(unused)]
     let netif_stack = Arc::new(EspNetifStack::new()?);
@@ -128,6 +143,8 @@ fn main() -> Result<()> {
         info!("Eth stopped");
     } 
 
+
+    info!("That's all, folks!");
     Ok(())
 }
 
@@ -140,38 +157,64 @@ fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
     info!("Handling Mandelbrot request");
 
     // Example: {} mandel.png 1000x750 -1.20,0.35 -1,0.20
-    let bounds = (100, 85);
+    let bounds = (1000, 750);
     let upper_left = Complex { re: -1.20, im: 0.35};
     let lower_right = Complex { re: -1.0, im: 0.20};
 
-    let mut PIXELS = vec![0; bounds.0 * bounds.1];
-    let mut ENCODED = Vec::new();
+    let mut pixel_buffer = vec![0; bounds.0 * bounds.1];
+    let mut encode_buffer = Vec::with_capacity(bounds.0 * bounds.1);
 
-    unsafe {
-        mandelbrot::render(&mut PIXELS, bounds, upper_left, lower_right);
-        info!("Mandelbrot rendered!");
-        print_heap_info();
+    mandelbrot::render(&mut pixel_buffer, bounds, upper_left, lower_right);
+    info!("Mandelbrot image rendered!");
+    print_heap_info();
 
-        BmpEncoder::new(&mut ENCODED)
-            .encode(&PIXELS, bounds.0 as u32, bounds.1 as u32, ColorType::L8)
-            .expect("Unable to encode image");
+    BmpEncoder::new(&mut encode_buffer)
+        .encode(&pixel_buffer, bounds.0 as u32, bounds.1 as u32, ColorType::L8)
+        .expect("Unable to encode image");
 
-        info!("Mandelbrot converted to jpeg!");
+    info!("Mandelbrot image converted!");
 
-        let response = Response::new(200)
-            .content_type("image/bmp")
-            .content_len(ENCODED.len())
-            .header("Content-Disposition", "inline; filename=mandel.bmp")
-            .header("Access-Control-Allow-Origin", "*")
-            // .header("X-Timestamp", SystemTime::now())
-            .body(Body::from(ENCODED))
-            ;
-        info!("Created Mandelbrot response");
+    let response = Response::new(200)
+        .content_type("image/bmp")
+        .content_len(encode_buffer.len())
+        .header("Content-Disposition", "inline; filename=mandel.bmp")
+        .header("Access-Control-Allow-Origin", "*")
+        // .header("X-Timestamp", SystemTime::now())
+        .body(Body::from(encode_buffer))
+        ;
+    info!("Created Mandelbrot image response");
 
-        Ok(response)
+    Ok(response)
+    
+}
+
+use querystring;
+fn handle_allocate_vector(_req: Request) -> Result<Response, Error> {
+    info!("Handling Allocate Vector request");
+
+    let query_string = _req.query_string().unwrap_or_default();
+    let query_params = querystring::querify(&query_string);
+    
+    let mut param_hash: HashMap<&str,&str> = HashMap::new();
+    for (k, v) in &query_params {
+        param_hash.insert(k,v);
     }
 
+    let kb_blocks: usize = param_hash["kb_blocks"].parse().expect("'kb_blocks' should be a valid integer");
+    let step: usize = param_hash["step"].parse().expect("'step' should be a valid integer");
 
+    info!("Requested to allocate {:?} KB blocks in step of {:?}. query_params: {:?}", &kb_blocks, &step, &query_params);
+
+    test_memory_allocation(kb_blocks, step);
+
+    let response = Response::new(200)
+                    .body(Body::from(format!("Vector of {:?} KB blocks allocated!", &kb_blocks)))
+                    ;
+
+    info!("Allocated successfully!");
+    print_heap_info();
+
+    Ok(response)
 }
 
 #[allow(unused_variables)]
@@ -181,8 +224,10 @@ fn httpd() -> Result<idf::Server> {
         .get(|_| Ok("Hello, world!".into()))?
         .at("/mandelbrot")
         .get(handle_mandelbrot)?
-        .at("/stop")
-        .get(|_| bail!("Stopping server!"))?
+        .at("/allocate_vector")
+        .get(handle_allocate_vector)?
+        .at("/quit")
+        .get(|_| bail!("Trying to quit..it may not be easy!"))?
         .at("/secret")
         .get(|_| {
             Response::new(403)
