@@ -157,7 +157,7 @@ fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
     info!("Handling Mandelbrot request");
 
     // Example: {} mandel.png 1000x750 -1.20,0.35 -1,0.20
-    let bounds = (1000, 750);
+    let bounds = (512, 512);
     let upper_left = Complex { re: -1.20, im: 0.35};
     let lower_right = Complex { re: -1.0, im: 0.20};
 

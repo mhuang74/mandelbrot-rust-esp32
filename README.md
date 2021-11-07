@@ -52,8 +52,9 @@ RUST_ESP32_STD_HELLO_WIFI_PASS = "PASSWORD"
     - consider switching to use `crossbeam=0.7` instead and follow the _task-queue_ approach from Programming Rust 
     - FIX: switched back to latest `rayon=1.5` by switching off Atomic64 on crossbeam-utils [issue-731](https://github.com/crossbeam-rs/crossbeam/issues/731)
 - [X] render Mandelbrot using single thread
-- [X] encode image as jpeg
+- [X] encode image as bmp
   - get LLVM error if encode as png
 - [X] put encoded image in HTTP response using Embedded::Svr interface
-- [X] successfully see Mandelbrot image in browser
+- [ ] increase image size by using SPIRAM to malloc buffers
+- [ ] successfully see Mandelbrot image in browser
 
