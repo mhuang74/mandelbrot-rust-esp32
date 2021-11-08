@@ -59,15 +59,15 @@ fn print_heap_info() {
 fn test_memory_allocation(kb_blocks:usize, step:usize) -> () {
     const KILOBYTE: usize = 1024;
 
-    print_heap_info();
-
-    for i in (1..kb_blocks).step_by(step) {
+    for i in (step..=kb_blocks).step_by(step) {
         let size = i * KILOBYTE;
         info!("{}: allocating Vec<u8> of size: {}", i, size);
         let _new_vec: Vec<u8> = Vec::with_capacity(size);
     }
 
     info!("Allocated {:?} KB blocks in step of {:?}.", &kb_blocks, &step);
+
+    print_heap_info();
 }
 
 fn main() -> Result<()> {
@@ -79,7 +79,6 @@ fn main() -> Result<()> {
     env::set_var("RUST_BACKTRACE", "1");
 
     info!("Hello from Mandelbrot-ESP!");
-    print_heap_info();
 
     test_memory_allocation(1024, 64);
 
@@ -111,6 +110,9 @@ fn main() -> Result<()> {
     info!("before httpd start");
 
     let httpd = httpd()?;
+
+    info!("after httpd start");
+    test_memory_allocation(1024, 64);
 
     let mut wait = mutex.0.lock().unwrap();
 
@@ -217,6 +219,20 @@ fn handle_allocate_vector(_req: Request) -> Result<Response, Error> {
     Ok(response)
 }
 
+fn handle_memory_test(_req: Request) -> Result<Response, Error> {
+    info!("Handling Memory Test request");
+
+    test_memory_allocation(1024, 64);
+
+    let response = Response::new(200)
+                    .body(Body::from("Memory test ran successfully!"))
+                    ;
+
+    info!("Memory test ran successfully!");
+
+    Ok(response)
+}
+
 #[allow(unused_variables)]
 fn httpd() -> Result<idf::Server> {
     let server = idf::ServerRegistry::new()
@@ -226,6 +242,8 @@ fn httpd() -> Result<idf::Server> {
         .get(handle_mandelbrot)?
         .at("/allocate_vector")
         .get(handle_allocate_vector)?
+        .at("/memory_test")
+        .get(handle_memory_test)?        
         .at("/quit")
         .get(|_| bail!("Trying to quit..it may not be easy!"))?
         .at("/secret")
