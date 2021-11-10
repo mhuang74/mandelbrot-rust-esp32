@@ -62,7 +62,10 @@ fn test_memory_allocation(kb_blocks:usize, step:usize) -> () {
     for i in (step..=kb_blocks).step_by(step) {
         let size = i * KILOBYTE;
         info!("{}: allocating Vec<u8> of size: {}", i, size);
-        let _new_vec: Vec<u8> = Vec::with_capacity(size);
+        let mut new_vec: Vec<u8> = Vec::with_capacity(size);
+        for j in 1..=size {
+            new_vec.push(j as u8);
+        }
     }
 
     info!("Allocated {:?} KB blocks in step of {:?}.", &kb_blocks, &step);
@@ -159,22 +162,23 @@ fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
     info!("Handling Mandelbrot request");
 
     // Example: {} mandel.png 1000x750 -1.20,0.35 -1,0.20
-    let bounds = (512, 512);
+    let bounds = (200, 200);
     let upper_left = Complex { re: -1.20, im: 0.35};
     let lower_right = Complex { re: -1.0, im: 0.20};
 
     let mut pixel_buffer = vec![0; bounds.0 * bounds.1];
-    let mut encode_buffer = Vec::with_capacity(bounds.0 * bounds.1);
 
     mandelbrot::render(&mut pixel_buffer, bounds, upper_left, lower_right);
     info!("Mandelbrot image rendered!");
     print_heap_info();
 
+    let mut encode_buffer = Vec::with_capacity(bounds.0 * bounds.1);
+
     BmpEncoder::new(&mut encode_buffer)
         .encode(&pixel_buffer, bounds.0 as u32, bounds.1 as u32, ColorType::L8)
         .expect("Unable to encode image");
 
-    info!("Mandelbrot image converted!");
+    info!("Mandelbrot image encoded!");
 
     let response = Response::new(200)
         .content_type("image/bmp")
