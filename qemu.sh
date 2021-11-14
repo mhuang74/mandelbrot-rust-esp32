@@ -2,8 +2,8 @@
 
 # You might need to change this...
 ESP_QEMU_PATH=$HOME/Projects/3rd-party/espressif/qemu/build
-IDF_PATH=$HOME/.espressif/esp-idf-release/v4.4
-IDF_VERSION=v4.4
+IDF_PATH=$HOME/.espressif/esp-idf-v4.3
+IDF_VERSION=v4.3
 BUILD=debug
 
 # use same esp-idf env as esp-idf-sys library

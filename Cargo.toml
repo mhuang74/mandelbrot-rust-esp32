@@ -49,7 +49,6 @@ num = "0.4"
 image = "0.23"
 rayon = "1.5"
 querystring = "1.1"
-#crossbeam = "0.7"
 
 [build-dependencies]
 embuild = "0.25"

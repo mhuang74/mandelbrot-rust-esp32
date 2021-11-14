@@ -1,0 +1,7 @@
+#!/bin/bash
+cargo clean -p esp-idf-sys
+rm sdkconfig
+cargo build --features native,backtrace
+espflash /dev/ttyUSB0 target/xtensa-esp32-espidf/debug/mandelbrot-esp32 > /dev/null 2>&1
+espmonitor --chip esp32 --bin target/xtensa-esp32-espidf/debug/mandelbrot-esp32  /dev/ttyUSB0 
+
