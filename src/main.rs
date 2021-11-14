@@ -8,8 +8,9 @@ use std::sync::{Condvar, Mutex};
 use std::usize;
 use std::{sync::Arc, thread, time::*};
 use std::collections::{HashMap};
+use std::io::{Write};
 
-use anyhow::*;
+use anyhow::{bail,Result};
 use log::*;
 
 #[allow(unused_imports)]
@@ -43,12 +44,6 @@ const SSID: &str = env!("RUST_ESP32_STD_DEMO_WIFI_SSID");
 #[cfg(not(feature = "qemu"))]
 const PASS: &str = env!("RUST_ESP32_STD_DEMO_WIFI_PASS");
 
-//const MAX_BOUNDS: (usize, usize) = (64, 64);
-
-// statically allocate image buffers
-// static mut PIXELS:[u8;  MAX_BOUNDS.0 * MAX_BOUNDS.1] = [0; MAX_BOUNDS.0 * MAX_BOUNDS.1];
-// statically allocate buffer for encoded image; assume jpeg gives at least 5:1 compression
-// static mut ENCODED:[u8; (MAX_BOUNDS.0 / 5 as usize) * (MAX_BOUNDS.1 / 5 as usize)] = [0; (MAX_BOUNDS.0 / 5 as usize) * (MAX_BOUNDS.1 / 5 as usize)];
 
 fn print_heap_info() {
     unsafe {
@@ -56,22 +51,6 @@ fn print_heap_info() {
     }
 }
 
-fn test_memory_allocation(kb_blocks:usize, step:usize) -> () {
-    const KILOBYTE: usize = 1024;
-
-    for i in (step..=kb_blocks).step_by(step) {
-        let size = i * KILOBYTE;
-        info!("{}: allocating Vec<u8> of size: {}", i, size);
-        let mut new_vec: Vec<u8> = Vec::with_capacity(size);
-        for j in 1..=size {
-            new_vec.push(j as u8);
-        }
-    }
-
-    info!("Allocated {:?} KB blocks in step of {:?}.", &kb_blocks, &step);
-
-    print_heap_info();
-}
 
 fn main() -> Result<()> {
     // Bind the log crate to the ESP Logging facilities
@@ -83,7 +62,7 @@ fn main() -> Result<()> {
 
     info!("Hello from Mandelbrot-ESP!");
 
-    test_memory_allocation(1024, 64);
+    // test_memory_allocation(512, 256);
 
     #[allow(unused)]
     let netif_stack = Arc::new(EspNetifStack::new()?);
@@ -108,17 +87,13 @@ fn main() -> Result<()> {
         sys_loop_stack.clone(),
     )?))?;    
 
-    let mutex: Arc<(std::sync::Mutex<Option<u32>>, Condvar)> = Arc::new((Mutex::new(None), Condvar::new()));
-
     info!("before httpd start");
-
     let httpd = httpd()?;
-
     info!("after httpd start");
-    test_memory_allocation(1024, 64);
+    // test_memory_allocation(512, 256);
 
+    let mutex: Arc<(std::sync::Mutex<Option<u32>>, Condvar)> = Arc::new((Mutex::new(None), Condvar::new()));
     let mut wait = mutex.0.lock().unwrap();
-
     #[allow(unused)]
     let cycles = loop {
         if let Some(cycles) = *wait {
@@ -128,8 +103,8 @@ fn main() -> Result<()> {
         }
     };
 
-    for s in 0..3 {
-        info!("Shutting down in {} secs", 3 - s);
+    for s in (0..3).rev() {
+        info!("Shutting down in {} secs", s);
         thread::sleep(Duration::from_secs(1));
     }
 
@@ -155,43 +130,91 @@ fn main() -> Result<()> {
 
 use num::Complex;
 mod mandelbrot;
-use image::{ColorType, codecs::bmp::BmpEncoder};
-
+mod encoder;
+use image;
 
 fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
-    info!("Handling Mandelbrot request");
+    let query_string = _req.query_string().unwrap_or_default();
+    let query_params = querystring::querify(&query_string);
+
+    info!("Handling Mandelbrot request. Params:{:?}", query_params);
+
+    let mut param_hash: HashMap<&str,&str> = HashMap::new();
+    for (k, v) in &query_params {
+        param_hash.insert(k,v);
+    }
+
+    let width: usize = param_hash["width"].parse().unwrap_or(640 as usize);
+    let height: usize = param_hash["height"].parse().unwrap_or(480 as usize);
 
     // Example: {} mandel.png 1000x750 -1.20,0.35 -1,0.20
-    let bounds = (200, 200);
-    let upper_left = Complex { re: -1.20, im: 0.35};
-    let lower_right = Complex { re: -1.0, im: 0.20};
+    let bounds: (usize, usize) = (width, height);
+    let pixel_buffer_size: usize = bounds.0 * bounds.1;
+    // assume 128 bytes for image header
+    let image_buffer_size: usize = pixel_buffer_size + 128 as usize;
+    const upper_left: Complex<f32> = Complex { re: -1.20, im: 0.35};
+    const lower_right: Complex<f32> = Complex { re: -1.0, im: 0.20};
 
-    let mut pixel_buffer = vec![0; bounds.0 * bounds.1];
+    info!("Rendering ({},{}) image from {:?} to {:?}", bounds.0, bounds.1, upper_left, lower_right);
 
-    mandelbrot::render(&mut pixel_buffer, bounds, upper_left, lower_right);
+    // let mut pixel_buffer: [u8; pixel_buffer_size] = [0; pixel_buffer_size];
+    // move pixel buffer to heap to avoid stack overflow
+    let mut pixel_buffer: Vec<u8> = Vec::with_capacity(pixel_buffer_size);
+    mandelbrot::render(&mut pixel_buffer, bounds, upper_left, lower_right)?;
     info!("Mandelbrot image rendered!");
-    print_heap_info();
+    
+    // use Vector as image buffer; add extra room for image metadata
+    let mut encode_buffer: Vec<u8> = Vec::with_capacity(image_buffer_size);
 
-    let mut encode_buffer = Vec::with_capacity(bounds.0 * bounds.1);
+    // turn Vector into Writable via Cursor
+    let mut writable_buffer = std::io::Cursor::new(&mut encode_buffer);
+    // sanity check: copy pixel buffer directly into writable buffer
+    // writable_buffer.write(&pixel_buffer);
 
-    BmpEncoder::new(&mut encode_buffer)
-        .encode(&pixel_buffer, bounds.0 as u32, bounds.1 as u32, ColorType::L8)
-        .expect("Unable to encode image");
+    // convert into image format
+    // !! TODO: figure out why this causes malloc error on esp32
+    // image::codecs::bmp::BmpEncoder::new(&mut writable_buffer)
+    //     .encode(&pixel_buffer, bounds.0 as u32, bounds.1 as u32, image::ColorType::L8)
+    //     .expect("Unable to encode image");
+
+    encoder::encode_grayscale(&mut writable_buffer, &pixel_buffer, bounds.0 as u32, bounds.1 as u32)?;
+
 
     info!("Mandelbrot image encoded!");
 
+    let body_len = writable_buffer.get_ref().len();
+    let body = Body::Bytes(encode_buffer);
+
     let response = Response::new(200)
-        .content_type("image/bmp")
-        .content_len(encode_buffer.len())
-        .header("Content-Disposition", "inline; filename=mandel.bmp")
-        .header("Access-Control-Allow-Origin", "*")
-        // .header("X-Timestamp", SystemTime::now())
-        .body(Body::from(encode_buffer))
+        // .content_type("image/bmp")
+        // .content_len(body_len)
+        // .header("Content-Disposition", "inline; filename=mandel.bmp")
+        // .header("Access-Control-Allow-Origin", "*")
+        .body(body)
         ;
     info!("Created Mandelbrot image response");
 
     Ok(response)
     
+}
+
+fn test_memory_allocation(kb_blocks:usize, step:usize) -> Result<Vec<u8>> {
+    const KILOBYTE: usize = 1024;
+
+    let mut my_vec: Vec<u8> = vec![];
+
+    for i in (step..=kb_blocks).step_by(step) {
+        let size = i * KILOBYTE;
+        info!("{}: allocating Vec<u8> of size: {}", i, size);
+        my_vec = Vec::with_capacity(size);
+        for j in 0..size {
+            my_vec.push('.' as u8);
+        }
+    }
+
+    info!("Allocated {:?} KB blocks in step of {:?}.", &kb_blocks, &step);
+
+    Ok(my_vec)
 }
 
 use querystring;
@@ -211,14 +234,14 @@ fn handle_allocate_vector(_req: Request) -> Result<Response, Error> {
 
     info!("Requested to allocate {:?} KB blocks in step of {:?}. query_params: {:?}", &kb_blocks, &step, &query_params);
 
-    test_memory_allocation(kb_blocks, step);
+    let test_vec = test_memory_allocation(kb_blocks, step).expect("Problem allocating test vector");
 
     let response = Response::new(200)
-                    .body(Body::from(format!("Vector of {:?} KB blocks allocated!", &kb_blocks)))
+                    .body(Body::from(test_vec))
                     ;
 
-    info!("Allocated successfully!");
-    print_heap_info();
+    info!("Allocated test vector successfully!");
+    // print_heap_info();
 
     Ok(response)
 }
