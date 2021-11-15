@@ -77,7 +77,7 @@ pub fn encode_grayscale(
     //// write image data
     
     // write grayscale palette
-    for val in 0u8..=128 {
+    for val in 0u8..=255 {
         // each color is written as BGRA, where A is always 0 and since only grayscale is being written, B = G = R = index
         // !! NOTE: change from write_all to write() to avoid alloc errors on esp32
         writer.write(&[val, val, val, 0])?;
