@@ -90,7 +90,6 @@ fn main() -> Result<()> {
     info!("before httpd start");
     let httpd = httpd()?;
     info!("after httpd start");
-    // test_memory_allocation(512, 256);
 
     let mutex: Arc<(std::sync::Mutex<Option<u32>>, Condvar)> = Arc::new((Mutex::new(None), Condvar::new()));
     let mut wait = mutex.0.lock().unwrap();
@@ -131,7 +130,6 @@ fn main() -> Result<()> {
 use num::Complex;
 mod mandelbrot;
 mod encoder;
-use image;
 
 fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
     let query_string = _req.query_string().unwrap_or_default();
@@ -146,50 +144,42 @@ fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
 
     let width: usize = param_hash["width"].parse().unwrap_or(640 as usize);
     let height: usize = param_hash["height"].parse().unwrap_or(480 as usize);
+    let bounds: (usize, usize) = (width, height);
+
+    let pixel_buffer_size: usize = bounds.0 * bounds.1;
+    // assume 1024 bytes enough for image header and other metadata
+    let image_buffer_size: usize = pixel_buffer_size + 1024 as usize;
 
     // Example: {} mandel.png 1000x750 -1.20,0.35 -1,0.20
-    let bounds: (usize, usize) = (width, height);
-    let pixel_buffer_size: usize = bounds.0 * bounds.1;
-    // assume 128 bytes for image header
-    let image_buffer_size: usize = pixel_buffer_size + 128 as usize;
     const upper_left: Complex<f32> = Complex { re: -1.20, im: 0.35};
     const lower_right: Complex<f32> = Complex { re: -1.0, im: 0.20};
 
     info!("Rendering ({},{}) image from {:?} to {:?}", bounds.0, bounds.1, upper_left, lower_right);
 
-    // let mut pixel_buffer: [u8; pixel_buffer_size] = [0; pixel_buffer_size];
-    // move pixel buffer to heap to avoid stack overflow
+    // use Vec (heap) as pixel buffer to avoid stack overflow
     let mut pixel_buffer: Vec<u8> = Vec::with_capacity(pixel_buffer_size);
+
     mandelbrot::render(&mut pixel_buffer, bounds, upper_left, lower_right)?;
     info!("Mandelbrot image rendered!");
     
-    // use Vector as image buffer; add extra room for image metadata
+    // use Vector (heap) as image buffer; add extra room for image metadata
     let mut encode_buffer: Vec<u8> = Vec::with_capacity(image_buffer_size);
 
     // turn Vector into Writable via Cursor
     let mut writable_buffer = std::io::Cursor::new(&mut encode_buffer);
-    // sanity check: copy pixel buffer directly into writable buffer
-    // writable_buffer.write(&pixel_buffer);
 
-    // convert into image format
-    // !! TODO: figure out why this causes malloc error on esp32
-    // image::codecs::bmp::BmpEncoder::new(&mut writable_buffer)
-    //     .encode(&pixel_buffer, bounds.0 as u32, bounds.1 as u32, image::ColorType::L8)
-    //     .expect("Unable to encode image");
-
+    // use patched BMP encoder from image crate
     encoder::encode_grayscale(&mut writable_buffer, &pixel_buffer, bounds.0 as u32, bounds.1 as u32)?;
-
-
     info!("Mandelbrot image encoded!");
 
     let body_len = writable_buffer.get_ref().len();
     let body = Body::Bytes(encode_buffer);
 
     let response = Response::new(200)
-        // .content_type("image/bmp")
-        // .content_len(body_len)
-        // .header("Content-Disposition", "inline; filename=mandel.bmp")
-        // .header("Access-Control-Allow-Origin", "*")
+        .content_type("image/bmp")
+        .content_len(body_len)
+        .header("Content-Disposition", "inline; filename=mandel.bmp")
+        .header("Access-Control-Allow-Origin", "*")
         .body(body)
         ;
     info!("Created Mandelbrot image response");
@@ -207,7 +197,7 @@ fn test_memory_allocation(kb_blocks:usize, step:usize) -> Result<Vec<u8>> {
         let size = i * KILOBYTE;
         info!("{}: allocating Vec<u8> of size: {}", i, size);
         my_vec = Vec::with_capacity(size);
-        for j in 0..size {
+        for _j in 0..size {
             my_vec.push('.' as u8);
         }
     }
@@ -249,7 +239,7 @@ fn handle_allocate_vector(_req: Request) -> Result<Response, Error> {
 fn handle_memory_test(_req: Request) -> Result<Response, Error> {
     info!("Handling Memory Test request");
 
-    test_memory_allocation(1024, 64);
+    test_memory_allocation(1024, 64)?;
 
     let response = Response::new(200)
                     .body(Body::from("Memory test ran successfully!"))

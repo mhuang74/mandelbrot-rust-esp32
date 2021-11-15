@@ -1,8 +1,10 @@
 /// BMP encoder, courtesy of https://github.com/image-rs/image/blob/master/src/codecs/bmp/encoder.rs
+/// Patched to work on esp32 without alloc error
 
 use byteorder::{LittleEndian, WriteBytesExt};
-use std::io::{self, Write};
+use std::io::{Write};
 use anyhow::{Result};
+use log::*;
 
 const BITMAPFILEHEADER_SIZE: u32 = 14;
 const BITMAPINFOHEADER_SIZE: u32 = 40;
@@ -11,7 +13,7 @@ const BITMAPV4HEADER_SIZE: u32 = 108;
 
 /// encode grayscale Bitmap image
 pub fn encode_grayscale(
-    writer: &mut Write,
+    writer: &mut dyn Write,
     image: &[u8],
     width: u32,
     height: u32,
@@ -28,6 +30,8 @@ pub fn encode_grayscale(
         .and_then(|v| v.checked_add(height * row_pad_size)).unwrap();
     let palette_size = palette_color_count * 4; // all palette colors are BGRA
     let file_size = bmp_header_size + dib_header_size + palette_size + image_size;
+
+    info!("image_size: {}\t palette_size: {}\t file_size: {}\t row_pad_size: {}", image_size, palette_size, file_size, row_pad_size);
 
     // write BMP header
     writer.write_u8(b'B')?;
@@ -73,21 +77,20 @@ pub fn encode_grayscale(
     //// write image data
     
     // write grayscale palette
-    for val in 0u8..=255 {
+    for val in 0u8..=128 {
         // each color is written as BGRA, where A is always 0 and since only grayscale is being written, B = G = R = index
-        writer.write_all(&[val, val, val, 0])?;
+        // !! NOTE: change from write_all to write() to avoid alloc errors on esp32
+        writer.write(&[val, val, val, 0])?;
     }
     
     // write bitmap
 
     
-    let x_stride = 1;
-    let y_stride = width * x_stride;
     for row in (0..height).rev() {
         // from the bottom up
-        let row_start = row * y_stride;
+        let row_start = row * width;
         for col in 0..width {
-            let pixel_start = (row_start + (col * x_stride)) as usize;
+            let pixel_start = (row_start + col) as usize;
             // color value is equal to the palette index
             writer.write_u8(image[pixel_start])?;
             // alpha is never written as it's not widely supported
