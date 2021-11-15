@@ -80,12 +80,12 @@ pub fn encode_grayscale(
     for val in 0u8..=255u8 {
         // each color is written as BGRA, where A is always 0 and since only grayscale is being written, B = G = R = index
         //// !! NOTE: change from single write_all() to multiple write_u8() to avoid alloc errors on esp32
-        // this causes alloc error on esp32-cam (tries to alloc > 2MB bytes)
+        // this works on esp32-cam
         writer.write_u8(val)?;
         writer.write_u8(val)?;
         writer.write_u8(val)?;
         writer.write_u8(0)?;
-        // this works on esp32-cam
+        // this causes alloc error on esp32-cam (tries to alloc > 2MB bytes)
         // writer.write(&[val, val, val, 0])?;
     }
     
