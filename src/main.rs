@@ -10,7 +10,7 @@ use std::{sync::Arc, thread, time::*};
 use std::collections::{HashMap};
 use std::io::{Write};
 
-use anyhow::{bail,Result};
+use anyhow::*;
 use log::*;
 
 #[allow(unused_imports)]
@@ -61,8 +61,6 @@ fn main() -> Result<()> {
     env::set_var("RUST_BACKTRACE", "1");
 
     info!("Hello from Mandelbrot-ESP!");
-
-    // test_memory_allocation(512, 256);
 
     #[allow(unused)]
     let netif_stack = Arc::new(EspNetifStack::new()?);
@@ -188,21 +186,80 @@ fn handle_mandelbrot(_req: Request) -> Result<Response, Error> {
     
 }
 
-fn test_memory_allocation(kb_blocks:usize, step:usize) -> Result<Vec<u8>> {
+use std::str::FromStr;
+
+#[derive(Debug, PartialEq)]
+enum WriteMethod {
+    Direct,
+    Write,
+    WriteU8,
+}
+
+impl FromStr for WriteMethod {
+    type Err = ();
+
+    fn from_str(input: &str) -> Result<WriteMethod, Self::Err> {
+        match &(input.to_ascii_lowercase())[..] {
+            "direct"    => Ok(WriteMethod::Direct),
+            "write"     => Ok(WriteMethod::Write),
+            "writeu8"   => Ok(WriteMethod::WriteU8),
+            _           => Err(()),
+        }
+    }
+}
+
+use byteorder::{WriteBytesExt};
+
+fn test_memory_allocation(kb_blocks:usize, step:usize, method:WriteMethod) -> Result<Vec<u8>, Error> {
     const KILOBYTE: usize = 1024;
 
     let mut my_vec: Vec<u8> = vec![];
 
     for i in (step..=kb_blocks).step_by(step) {
         let size = i * KILOBYTE;
-        info!("{}: allocating Vec<u8> of size: {}", i, size);
         my_vec = Vec::with_capacity(size);
-        for _j in 0..size {
-            my_vec.push('.' as u8);
+        info!("{}: allocated Vec<u8> of size: {}", i, size);
+
+        match method {
+            WriteMethod::Direct => {
+
+                for j in 0..size {
+                    my_vec.push(j as u8);
+                }
+            },
+            WriteMethod::Write => {
+
+                // turn Vector into Writable via Cursor
+                let mut cursored  = std::io::Cursor::new(&mut my_vec);
+                let mut writable_buffer: &mut Write = &mut cursored;
+                
+                for val in 0u8..=255u8 {
+                    writable_buffer.write_all(&[val, val, val, 0] )?;
+                }
+
+            },
+            WriteMethod::WriteU8 => {
+
+                // turn Vector into Writable via Cursor
+                let mut cursored  = std::io::Cursor::new(&mut my_vec);
+                let mut writable_buffer: &mut Write = &mut cursored;
+
+                for val in 0u8..255u8 {
+                    writable_buffer.write_u8(val)?;
+                }
+
+            },
+            _ => {
+
+                return Err(anyhow!("Unsupported write method: {:?}", method));
+
+            }
         }
+
+
     }
 
-    info!("Allocated {:?} KB blocks in step of {:?}.", &kb_blocks, &step);
+    info!("Allocated {:?} KB blocks in step of {:?} and wrote using method '{:?}'", &kb_blocks, &step, &method);
 
     Ok(my_vec)
 }
@@ -221,10 +278,11 @@ fn handle_allocate_vector(_req: Request) -> Result<Response, Error> {
 
     let kb_blocks: usize = param_hash["kb_blocks"].parse().expect("'kb_blocks' should be a valid integer");
     let step: usize = param_hash["step"].parse().expect("'step' should be a valid integer");
+    let method: WriteMethod = WriteMethod::from_str(param_hash["write_method"]).expect("'write_method' not recognized");
 
-    info!("Requested to allocate {:?} KB blocks in step of {:?}. query_params: {:?}", &kb_blocks, &step, &query_params);
+    info!("Requested to allocate {} KB blocks in step of {} and using method {:?}. query_params: {:?}", &kb_blocks, &step, &method, &query_params);
 
-    let test_vec = test_memory_allocation(kb_blocks, step).expect("Problem allocating test vector");
+    let test_vec = test_memory_allocation(kb_blocks, step, method).expect("Problem allocating test vector");
 
     let response = Response::new(200)
                     .body(Body::from(test_vec))
@@ -239,7 +297,7 @@ fn handle_allocate_vector(_req: Request) -> Result<Response, Error> {
 fn handle_memory_test(_req: Request) -> Result<Response, Error> {
     info!("Handling Memory Test request");
 
-    test_memory_allocation(1024, 64)?;
+    test_memory_allocation(1024, 64, WriteMethod::Direct)?;
 
     let response = Response::new(200)
                     .body(Body::from("Memory test ran successfully!"))
@@ -249,6 +307,7 @@ fn handle_memory_test(_req: Request) -> Result<Response, Error> {
 
     Ok(response)
 }
+
 
 #[allow(unused_variables)]
 fn httpd() -> Result<idf::Server> {
@@ -260,7 +319,7 @@ fn httpd() -> Result<idf::Server> {
         .at("/allocate_vector")
         .get(handle_allocate_vector)?
         .at("/memory_test")
-        .get(handle_memory_test)?        
+        .get(handle_memory_test)?
         .at("/quit")
         .get(|_| bail!("Trying to quit..it may not be easy!"))?
         .at("/secret")
